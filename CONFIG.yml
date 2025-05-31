@@ -1,13 +1,23 @@
-hidden_units_1: 4096
-hidden_units_2: 2048
-hidden_units_3: 1024
-hidden_units_4: 512
-hidden_units_5: 256
-hidden_units_6: 128
-hidden_units_7: 64
+# MLP Hidden Layer Configuration
+# hidden_units_1: 4096
+# hidden_units_2: 2048
+# hidden_units_3: 1024
+# hidden_units_4: 512
+# hidden_units_5: 256
+# hidden_units_6: 128
+# hidden_units_7: 64
+
+# CNN Configuration
+conv_channels_1: 64
+conv_channels_2: 128
+conv_channels_3: 256
+conv_channels_4: 512
+conv_channels_5: 1024
+linear_layer_1: 512
+linear_layer_2: 256
 dropout_rate: 0.3
-learning_rate: 0.0005
-batch_size: 256
+learning_rate: 0.0001
+batch_size: 64
 epochs: 100
 train_split: 0.8
-save_threshold: 0.6
+save_threshold: 0.7

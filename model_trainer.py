@@ -26,8 +26,9 @@ class PhonemeModelTrainer:
         labels = []
 
         # Directories to load data from
-        directories = [self.data_dir, os.path.join(os.path.dirname(self.data_dir), "augmented_data")]
-
+        # directories = [self.data_dir, os.path.join(os.path.dirname(self.data_dir), "augmented_data")]
+        directories = [self.data_dir]
+        
         for directory in directories:
             for root, _, files in os.walk(directory):
                 for file in files:
@@ -74,40 +75,62 @@ class PhonemeModelTrainer:
         return torch.tensor(features, dtype=torch.float32), torch.tensor(labels_encoded, dtype=torch.long)
 
     def build_model(self, input_dim, num_classes):
-        class PhonemeRecognitionModel(nn.Module):
-            def __init__(self, input_dim, hidden_units, dropout_rate, num_classes):
-                super(PhonemeRecognitionModel, self).__init__()
-                self.layers = nn.ModuleList()
-                self.num_layers = len(hidden_units)
+        class PhonemeRecognitionCNN(nn.Module):
+            def __init__(self, input_dim, conv_channels, linear_layers, dropout_rate, num_classes):
+                super(PhonemeRecognitionCNN, self).__init__()
+                self.conv_layers = nn.ModuleList()
+                self.num_conv_layers = len(conv_channels)
 
-                # Create layers dynamically
-                for i in range(self.num_layers):
-                    in_features = input_dim if i == 0 else hidden_units[i - 1]
-                    out_features = hidden_units[i]
-                    self.layers.append(nn.Sequential(
+                # Create convolutional layers dynamically
+                for i in range(self.num_conv_layers):
+                    in_channels = 1 if i == 0 else conv_channels[i - 1]
+                    out_channels = conv_channels[i]
+                    self.conv_layers.append(nn.Sequential(
+                        nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, stride=1, padding=1),
+                        nn.BatchNorm1d(out_channels),
+                        nn.ReLU()
+                    ))
+
+                # Global average pooling
+                self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
+
+                # Fully connected layers
+                self.fc_layers = nn.ModuleList()
+                for i in range(len(linear_layers)):
+                    in_features = conv_channels[-1] if i == 0 else linear_layers[i - 1]
+                    out_features = linear_layers[i]
+                    self.fc_layers.append(nn.Sequential(
                         nn.Linear(in_features, out_features),
-                        nn.BatchNorm1d(out_features),
                         nn.ReLU(),
                         nn.Dropout(dropout_rate)
                     ))
 
                 # Output layer
-                self.output_layer = nn.Linear(hidden_units[-1], num_classes)
+                self.output_layer = nn.Linear(linear_layers[-1], num_classes)
 
             def forward(self, x):
-                for layer in self.layers:
-                    x = layer(x)
+                x = x.unsqueeze(1)  # Add channel dimension for Conv1D
+                for conv_layer in self.conv_layers:
+                    x = conv_layer(x)
+                x = self.global_avg_pool(x)  # Apply global average pooling
+                x = x.view(x.size(0), -1)  # Flatten for fully connected layers
+                for fc_layer in self.fc_layers:
+                    x = fc_layer(x)
                 x = self.output_layer(x)  # Output shape: (batch_size, num_classes)
                 return x
 
-        # Dynamically fetch hidden units for 7 layers from the configuration
-        hidden_units = [
-            self.config[f"hidden_units_{i}"] for i in range(1, 8)  # Fetch keys for hidden_units_1 to hidden_units_7
+        # Dynamically fetch convolutional channel sizes and linear layer sizes from the configuration
+        conv_channels = [
+            self.config[f"conv_channels_{i}"] for i in range(1, 6)  # Fetch keys for conv_channels_1 to conv_channels_5
+        ]
+        linear_layers = [
+            self.config[f"linear_layer_{i}"] for i in range(1, 3)  # Fetch keys for linear_layer_1 to linear_layer_2
         ]
 
-        self.model = PhonemeRecognitionModel(
+        self.model = PhonemeRecognitionCNN(
             input_dim=input_dim,
-            hidden_units=hidden_units,
+            conv_channels=conv_channels,
+            linear_layers=linear_layers,
             dropout_rate=self.config["dropout_rate"],
             num_classes=num_classes
         ).to(self.device)
