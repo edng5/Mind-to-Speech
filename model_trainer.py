@@ -54,26 +54,38 @@ class PhonemeModelTrainer:
 
     def build_model(self, input_dim, num_classes):
         class PhonemeRecognitionModel(nn.Module):
-            def __init__(self, input_dim, hidden_units_1, hidden_units_2, dropout_rate, num_classes):
+            def __init__(self, input_dim, hidden_units_1, hidden_units_2, hidden_units_3, hidden_units_4, dropout_rate, num_classes):
                 super(PhonemeRecognitionModel, self).__init__()
                 self.fc1 = nn.Linear(input_dim, hidden_units_1)
+                self.bn1 = nn.BatchNorm1d(hidden_units_1)
                 self.fc2 = nn.Linear(hidden_units_1, hidden_units_2)
-                self.fc3 = nn.Linear(hidden_units_2, num_classes)
+                self.bn2 = nn.BatchNorm1d(hidden_units_2)
+                self.fc3 = nn.Linear(hidden_units_2, hidden_units_3)
+                self.bn3 = nn.BatchNorm1d(hidden_units_3)
+                self.fc4 = nn.Linear(hidden_units_3, hidden_units_4)
+                self.bn4 = nn.BatchNorm1d(hidden_units_4)
+                self.fc5 = nn.Linear(hidden_units_4, num_classes)
                 self.dropout = nn.Dropout(dropout_rate)
                 self.relu = nn.ReLU()
 
             def forward(self, x):
-                x = self.relu(self.fc1(x))
+                x = self.relu(self.bn1(self.fc1(x)))
                 x = self.dropout(x)
-                x = self.relu(self.fc2(x))
+                x = self.relu(self.bn2(self.fc2(x)))
                 x = self.dropout(x)
-                x = self.fc3(x)
+                x = self.relu(self.bn3(self.fc3(x)))
+                x = self.dropout(x)
+                x = self.relu(self.bn4(self.fc4(x)))
+                x = self.dropout(x)
+                x = self.fc5(x)
                 return x
 
         self.model = PhonemeRecognitionModel(
             input_dim=input_dim,
             hidden_units_1=self.config["hidden_units_1"],
             hidden_units_2=self.config["hidden_units_2"],
+            hidden_units_3=self.config["hidden_units_3"],
+            hidden_units_4=self.config["hidden_units_4"],  # New layer
             dropout_rate=self.config["dropout_rate"],
             num_classes=num_classes
         ).to(self.device)
@@ -127,9 +139,10 @@ class PhonemeModelTrainer:
 
     def train_one_epoch(self, epoch):
         self.model.train()
-        train_loader = self.get_train_loader()  # Ensure this method returns the training DataLoader
+        train_loader = self.get_train_loader()
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(self.model.parameters(), lr=self.config["learning_rate"])
+        optimizer = optim.AdamW(self.model.parameters(), lr=self.config["learning_rate"])
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)  # Reduce LR every 10 epochs
 
         for batch_features, batch_labels in train_loader:
             batch_features, batch_labels = batch_features.to(self.device), batch_labels.to(self.device)
@@ -140,6 +153,7 @@ class PhonemeModelTrainer:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)  # Clip gradients
             optimizer.step()
 
+        scheduler.step()  # Update learning rate
         print(f"Epoch {epoch + 1}, Loss: {loss.item()}")
 
     def get_train_loader(self):
