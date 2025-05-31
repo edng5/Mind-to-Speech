@@ -76,41 +76,63 @@ class PhonemeModelTrainer:
 
     def build_model(self, input_dim, num_classes):
         class PhonemeRecognitionCNN(nn.Module):
-            def __init__(self, input_dim, num_classes, dropout_rate):
+            def __init__(self, input_dim, conv_channels, linear_layers, dropout_rate, num_classes):
                 super(PhonemeRecognitionCNN, self).__init__()
-                self.conv1 = nn.Conv1d(in_channels=1, out_channels=64, kernel_size=3, stride=1, padding=1)
-                self.bn1 = nn.BatchNorm1d(64)
-                self.conv2 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1)
-                self.bn2 = nn.BatchNorm1d(128)
-                self.conv3 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1)
-                self.bn3 = nn.BatchNorm1d(256)
-                self.conv4 = nn.Conv1d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1)
-                self.bn4 = nn.BatchNorm1d(512)
-                self.conv5 = nn.Conv1d(in_channels=512, out_channels=1024, kernel_size=3, stride=1, padding=1)
-                self.bn5 = nn.BatchNorm1d(1024)
-                self.global_avg_pool = nn.AdaptiveAvgPool1d(1)  # Global average pooling
-                self.fc1 = nn.Linear(1024, 512)
-                self.fc2 = nn.Linear(512, num_classes)
-                self.dropout = nn.Dropout(dropout_rate)
-                self.relu = nn.ReLU()
+                self.conv_layers = nn.ModuleList()
+                self.num_conv_layers = len(conv_channels)
+
+                # Create convolutional layers dynamically
+                for i in range(self.num_conv_layers):
+                    in_channels = 1 if i == 0 else conv_channels[i - 1]
+                    out_channels = conv_channels[i]
+                    self.conv_layers.append(nn.Sequential(
+                        nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, stride=1, padding=1),
+                        nn.BatchNorm1d(out_channels),
+                        nn.ReLU()
+                    ))
+
+                # Global average pooling
+                self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
+
+                # Fully connected layers
+                self.fc_layers = nn.ModuleList()
+                for i in range(len(linear_layers)):
+                    in_features = conv_channels[-1] if i == 0 else linear_layers[i - 1]
+                    out_features = linear_layers[i]
+                    self.fc_layers.append(nn.Sequential(
+                        nn.Linear(in_features, out_features),
+                        nn.ReLU(),
+                        nn.Dropout(dropout_rate)
+                    ))
+
+                # Output layer
+                self.output_layer = nn.Linear(linear_layers[-1], num_classes)
 
             def forward(self, x):
                 x = x.unsqueeze(1)  # Add channel dimension for Conv1D
-                x = self.relu(self.bn1(self.conv1(x)))
-                x = self.relu(self.bn2(self.conv2(x)))
-                x = self.relu(self.bn3(self.conv3(x)))
-                x = self.relu(self.bn4(self.conv4(x)))
-                x = self.relu(self.bn5(self.conv5(x)))
+                for conv_layer in self.conv_layers:
+                    x = conv_layer(x)
                 x = self.global_avg_pool(x)  # Apply global average pooling
                 x = x.view(x.size(0), -1)  # Flatten for fully connected layers
-                x = self.dropout(self.relu(self.fc1(x)))
-                x = self.fc2(x)
+                for fc_layer in self.fc_layers:
+                    x = fc_layer(x)
+                x = self.output_layer(x)  # Output shape: (batch_size, num_classes)
                 return x
+
+        # Dynamically fetch convolutional channel sizes and linear layer sizes from the configuration
+        conv_channels = [
+            self.config[f"conv_channels_{i}"] for i in range(1, 6)  # Fetch keys for conv_channels_1 to conv_channels_5
+        ]
+        linear_layers = [
+            self.config[f"linear_layer_{i}"] for i in range(1, 3)  # Fetch keys for linear_layer_1 to linear_layer_2
+        ]
 
         self.model = PhonemeRecognitionCNN(
             input_dim=input_dim,
-            num_classes=num_classes,
-            dropout_rate=self.config["dropout_rate"]
+            conv_channels=conv_channels,
+            linear_layers=linear_layers,
+            dropout_rate=self.config["dropout_rate"],
+            num_classes=num_classes
         ).to(self.device)
 
     def initialize_weights(self):
