@@ -26,8 +26,9 @@ class PhonemeModelTrainer:
         labels = []
 
         # Directories to load data from
-        directories = [self.data_dir, os.path.join(os.path.dirname(self.data_dir), "augmented_data")]
-
+        # directories = [self.data_dir, os.path.join(os.path.dirname(self.data_dir), "augmented_data")]
+        directories = [self.data_dir]
+        
         for directory in directories:
             for root, _, files in os.walk(directory):
                 for file in files:
@@ -74,42 +75,42 @@ class PhonemeModelTrainer:
         return torch.tensor(features, dtype=torch.float32), torch.tensor(labels_encoded, dtype=torch.long)
 
     def build_model(self, input_dim, num_classes):
-        class PhonemeRecognitionModel(nn.Module):
-            def __init__(self, input_dim, hidden_units, dropout_rate, num_classes):
-                super(PhonemeRecognitionModel, self).__init__()
-                self.layers = nn.ModuleList()
-                self.num_layers = len(hidden_units)
-
-                # Create layers dynamically
-                for i in range(self.num_layers):
-                    in_features = input_dim if i == 0 else hidden_units[i - 1]
-                    out_features = hidden_units[i]
-                    self.layers.append(nn.Sequential(
-                        nn.Linear(in_features, out_features),
-                        nn.BatchNorm1d(out_features),
-                        nn.ReLU(),
-                        nn.Dropout(dropout_rate)
-                    ))
-
-                # Output layer
-                self.output_layer = nn.Linear(hidden_units[-1], num_classes)
+        class PhonemeRecognitionCNN(nn.Module):
+            def __init__(self, input_dim, num_classes, dropout_rate):
+                super(PhonemeRecognitionCNN, self).__init__()
+                self.conv1 = nn.Conv1d(in_channels=1, out_channels=64, kernel_size=3, stride=1, padding=1)
+                self.bn1 = nn.BatchNorm1d(64)
+                self.conv2 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1)
+                self.bn2 = nn.BatchNorm1d(128)
+                self.conv3 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1)
+                self.bn3 = nn.BatchNorm1d(256)
+                self.conv4 = nn.Conv1d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1)
+                self.bn4 = nn.BatchNorm1d(512)
+                self.conv5 = nn.Conv1d(in_channels=512, out_channels=1024, kernel_size=3, stride=1, padding=1)
+                self.bn5 = nn.BatchNorm1d(1024)
+                self.global_avg_pool = nn.AdaptiveAvgPool1d(1)  # Global average pooling
+                self.fc1 = nn.Linear(1024, 512)
+                self.fc2 = nn.Linear(512, num_classes)
+                self.dropout = nn.Dropout(dropout_rate)
+                self.relu = nn.ReLU()
 
             def forward(self, x):
-                for layer in self.layers:
-                    x = layer(x)
-                x = self.output_layer(x)  # Output shape: (batch_size, num_classes)
+                x = x.unsqueeze(1)  # Add channel dimension for Conv1D
+                x = self.relu(self.bn1(self.conv1(x)))
+                x = self.relu(self.bn2(self.conv2(x)))
+                x = self.relu(self.bn3(self.conv3(x)))
+                x = self.relu(self.bn4(self.conv4(x)))
+                x = self.relu(self.bn5(self.conv5(x)))
+                x = self.global_avg_pool(x)  # Apply global average pooling
+                x = x.view(x.size(0), -1)  # Flatten for fully connected layers
+                x = self.dropout(self.relu(self.fc1(x)))
+                x = self.fc2(x)
                 return x
 
-        # Dynamically fetch hidden units for 7 layers from the configuration
-        hidden_units = [
-            self.config[f"hidden_units_{i}"] for i in range(1, 8)  # Fetch keys for hidden_units_1 to hidden_units_7
-        ]
-
-        self.model = PhonemeRecognitionModel(
+        self.model = PhonemeRecognitionCNN(
             input_dim=input_dim,
-            hidden_units=hidden_units,
-            dropout_rate=self.config["dropout_rate"],
-            num_classes=num_classes
+            num_classes=num_classes,
+            dropout_rate=self.config["dropout_rate"]
         ).to(self.device)
 
     def initialize_weights(self):
