@@ -60,8 +60,12 @@ def runner():
         print("Evaluating the model...")
         predictions, labels = trainer.evaluate(checkpoint_path)
 
+        # Convert predictions and labels to NumPy arrays
+        predictions = np.array(predictions)
+        labels = np.array(labels)
+
         # Calculate accuracy
-        accuracy = (np.array(predictions) == np.array(labels)).mean()
+        accuracy = (predictions == labels).mean()
         print(f"Accuracy after epoch {epoch + 1}: {accuracy:.4f}")
 
         # Save checkpoint only if accuracy > save_threshold

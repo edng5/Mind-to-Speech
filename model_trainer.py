@@ -24,68 +24,90 @@ class PhonemeModelTrainer:
     def load_data(self):
         features = []
         labels = []
-        for root, _, files in os.walk(self.data_dir):
-            for file in files:
-                if file.endswith("_events.tsv"):
-                    file_path = os.path.join(root, file)
-                    df = pd.read_csv(file_path, sep="\t")
-                    # Ensure numeric conversion for features
-                    numeric_features = df[["onset", "duration", "place", "manner", "voicing"]].apply(pd.to_numeric, errors="coerce").fillna(0)
-                    features.append(numeric_features.values)
-                    labels.extend(df["phoneme1"].fillna("n/a").values)
-        return np.vstack(features), labels
+
+        # Directories to load data from
+        directories = [self.data_dir, os.path.join(os.path.dirname(self.data_dir), "augmented_data")]
+
+        for directory in directories:
+            for root, _, files in os.walk(directory):
+                for file in files:
+                    if file.endswith(".csv"):
+                        file_path = os.path.join(root, file)
+                        df = pd.read_csv(file_path)
+
+                        # Skip empty DataFrames
+                        if df.empty:
+                            print(f"File {file_path} is empty. Skipping...")
+                            continue
+
+                        # Normalize column names
+                        df.columns = df.columns.str.strip().str.lower()  # Strip spaces and convert to lowercase
+
+                        # Extract specified features
+                        feature_columns = ["stimulus", "tms", "tmstarget", "place", "manner", "voicing", "category"]
+                        if not all(col in df.columns for col in feature_columns):
+                            raise KeyError(f"Missing columns in {file_path}: {set(feature_columns) - set(df.columns)}")
+
+                        extracted_features = df[feature_columns].apply(lambda x: pd.factorize(x)[0], axis=0)  # Factorize categorical features
+                        features.append(extracted_features.values)
+
+                        # Combine Phoneme1 and Phoneme2 into a single column
+                        df["combined_phonemes"] = df["phoneme1"].fillna("") + "" + df["phoneme2"].fillna("")
+                        combined_labels = pd.factorize(df["combined_phonemes"])[0]  # Factorize combined phonemes
+                        labels.append(combined_labels)
+
+        return np.vstack(features), np.hstack(labels)
 
     def preprocess_data(self, features, labels):
-        # Compute mean and standard deviation
+        # Standardize features
         mean = np.mean(features, axis=0)
         std = np.std(features, axis=0)
-        
-        # Avoid division by zero by replacing zero std with 1
-        std[std == 0] = 1
-        
-        # Standardize features
+        std[std == 0] = 1  # Avoid division by zero
         features = (features - mean) / std
-        
-        unique_labels = list(set(labels))
+
+        # Encode labels
+        unique_labels = np.unique(labels)
         self.label_to_index = {label: idx for idx, label in enumerate(unique_labels)}
         self.index_to_label = {idx: label for label, idx in self.label_to_index.items()}
-        labels_encoded = np.array([self.label_to_index[label] for label in labels])
+        labels_encoded = np.array([self.label_to_index[label] for label in labels])  # Handle 1D labels
+
         return torch.tensor(features, dtype=torch.float32), torch.tensor(labels_encoded, dtype=torch.long)
 
     def build_model(self, input_dim, num_classes):
         class PhonemeRecognitionModel(nn.Module):
-            def __init__(self, input_dim, hidden_units_1, hidden_units_2, hidden_units_3, hidden_units_4, dropout_rate, num_classes):
+            def __init__(self, input_dim, hidden_units, dropout_rate, num_classes):
                 super(PhonemeRecognitionModel, self).__init__()
-                self.fc1 = nn.Linear(input_dim, hidden_units_1)
-                self.bn1 = nn.BatchNorm1d(hidden_units_1)
-                self.fc2 = nn.Linear(hidden_units_1, hidden_units_2)
-                self.bn2 = nn.BatchNorm1d(hidden_units_2)
-                self.fc3 = nn.Linear(hidden_units_2, hidden_units_3)
-                self.bn3 = nn.BatchNorm1d(hidden_units_3)
-                self.fc4 = nn.Linear(hidden_units_3, hidden_units_4)
-                self.bn4 = nn.BatchNorm1d(hidden_units_4)
-                self.fc5 = nn.Linear(hidden_units_4, num_classes)
-                self.dropout = nn.Dropout(dropout_rate)
-                self.relu = nn.ReLU()
+                self.layers = nn.ModuleList()
+                self.num_layers = len(hidden_units)
+
+                # Create layers dynamically
+                for i in range(self.num_layers):
+                    in_features = input_dim if i == 0 else hidden_units[i - 1]
+                    out_features = hidden_units[i]
+                    self.layers.append(nn.Sequential(
+                        nn.Linear(in_features, out_features),
+                        nn.BatchNorm1d(out_features),
+                        nn.ReLU(),
+                        nn.Dropout(dropout_rate)
+                    ))
+
+                # Output layer
+                self.output_layer = nn.Linear(hidden_units[-1], num_classes)
 
             def forward(self, x):
-                x = self.relu(self.bn1(self.fc1(x)))
-                x = self.dropout(x)
-                x = self.relu(self.bn2(self.fc2(x)))
-                x = self.dropout(x)
-                x = self.relu(self.bn3(self.fc3(x)))
-                x = self.dropout(x)
-                x = self.relu(self.bn4(self.fc4(x)))
-                x = self.dropout(x)
-                x = self.fc5(x)
+                for layer in self.layers:
+                    x = layer(x)
+                x = self.output_layer(x)  # Output shape: (batch_size, num_classes)
                 return x
+
+        # Dynamically fetch hidden units for 7 layers from the configuration
+        hidden_units = [
+            self.config[f"hidden_units_{i}"] for i in range(1, 8)  # Fetch keys for hidden_units_1 to hidden_units_7
+        ]
 
         self.model = PhonemeRecognitionModel(
             input_dim=input_dim,
-            hidden_units_1=self.config["hidden_units_1"],
-            hidden_units_2=self.config["hidden_units_2"],
-            hidden_units_3=self.config["hidden_units_3"],
-            hidden_units_4=self.config["hidden_units_4"],  # New layer
+            hidden_units=hidden_units,
             dropout_rate=self.config["dropout_rate"],
             num_classes=num_classes
         ).to(self.device)
@@ -142,18 +164,18 @@ class PhonemeModelTrainer:
         train_loader = self.get_train_loader()
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.AdamW(self.model.parameters(), lr=self.config["learning_rate"])
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)  # Reduce LR every 10 epochs
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
 
         for batch_features, batch_labels in train_loader:
             batch_features, batch_labels = batch_features.to(self.device), batch_labels.to(self.device)
             optimizer.zero_grad()
-            outputs = self.model(batch_features)
-            loss = criterion(outputs, batch_labels)
+            outputs = self.model(batch_features)  # Shape: (batch_size, num_classes)
+            loss = criterion(outputs, batch_labels)  # Single-column labels
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)  # Clip gradients
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             optimizer.step()
 
-        scheduler.step()  # Update learning rate
+        scheduler.step()
         print(f"Epoch {epoch + 1}, Loss: {loss.item()}")
 
     def get_train_loader(self):
@@ -191,12 +213,12 @@ class PhonemeModelTrainer:
         with torch.no_grad():
             for batch_features, batch_labels in test_loader:
                 batch_features, batch_labels = batch_features.to(self.device), batch_labels.to(self.device)
-                outputs = self.model(batch_features)
-                _, predictions = torch.max(outputs, 1)
+                outputs = self.model(batch_features)  # Shape: (batch_size, num_classes)
+                _, predictions = torch.max(outputs, 1)  # Get predictions
                 all_predictions.extend(predictions.cpu().numpy())
                 all_labels.extend(batch_labels.cpu().numpy())
 
-        return all_predictions, all_labels
+        return np.array(all_predictions), np.array(all_labels)
 
     def parse_phonemes_to_sentence(self, phonemes):
         words = []

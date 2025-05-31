@@ -41,29 +41,32 @@ def generate_phoneme_chunks(phonemes, max_len=7):
 def score_sentence(words):
     return len(words)  # You could use a language model here
 
-def phonemes_to_sentence(phoneme_seq):
-    all_chunks = generate_phoneme_chunks(phoneme_seq)
-    best_sentence = []
-    best_score = -1
+def phonemes_to_sentence(phoneme_seq_list):
+    """
+    Converts a list of lists of phonemes into a sentence.
+    Each sublist represents phonemes for a single word.
+    """
+    sentence = []
+    for phoneme_seq in phoneme_seq_list:
+        # Decode each sublist of phonemes into a word
+        chunk = ' '.join(phoneme_seq)
+        word_options = phoneme_to_word.get(chunk, [])
+        if word_options:
+            sentence.append(word_options[0])  # Use the first word option
+        else:
+            sentence.append("[UNKNOWN]")  # Placeholder for unknown phonemes
 
-    for chunk_seq in all_chunks:
-        word_options = [phoneme_to_word.get(chunk, []) for chunk in chunk_seq]
-        if not all(word_options):  # Skip invalid chunks
-            continue
-        sentence = [options[0] for options in word_options]
-        score = score_sentence(sentence)
-        if score > best_score:
-            best_score = score
-            best_sentence = sentence
-
-    if not best_sentence:
-        return "No valid sentence could be generated from the given phonemes."
-    return ' '.join(best_sentence).capitalize() + '.'
+    # Construct the sentence
+    return ' '.join(sentence).capitalize() + '.'
 
 
 
 
 if __name__ == "__main__":
-    phonemes = ['HH', 'AH0', 'L', 'OW1'] # temp testing
-    # phenomes = prediction() # TODO: make prediction using the model
+    # Example input: List of lists where each sublist contains phonemes for a word
+    phonemes = [['HH', 'AH0', 'L', 'OW1'], ['W', 'ER0', 'L', 'D']]  # Represents "hello world"
+
+    # EEG_readings = ''
+
+    # phenomes = predictionEEG_readings) # TODO: make prediction using the model
     print(phonemes_to_sentence(phonemes))
