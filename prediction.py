@@ -64,6 +64,6 @@ def phonemes_to_sentence(phoneme_seq):
 
 
 if __name__ == "__main__":
-    phonemes = ['HH', 'AH', 'L', 'OW', 'W', 'ER', 'L', 'D'] # temp testing
+    phonemes = ['HH', 'AH0', 'L', 'OW1'] # temp testing
     # phenomes = prediction() # TODO: make prediction using the model
     print(phonemes_to_sentence(phonemes))
