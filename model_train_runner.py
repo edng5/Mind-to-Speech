@@ -20,7 +20,7 @@ def runner():
     # Paths to configuration, data, and checkpoint files
     config_path = os.path.abspath("..\\Mind-to-Speech\\CONFIG.yml")
     data_dir = os.path.abspath("..\\Mind-to-Speech\\data")
-    models_dir = os.path.abspath("..\\Mind-to-Speech\\models")
+    models_dir = os.path.abspath("..\\Mind-to-Speech\\temp_models")
     base_checkpoint_path = os.path.join(models_dir, "model_checkpoint")
 
     print(f"Config Path: {config_path}")
