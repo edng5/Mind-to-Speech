@@ -66,6 +66,13 @@ class PhonemeModelTrainer:
         std[std == 0] = 1  # Avoid division by zero
         features = (features - mean) / std
 
+        # Reshape features for Transformer architecture
+        if self.config["architecture"] == "Transformer":
+            # Ensure features are reshaped to (batch_size, seq_len, input_dim)
+            input_dim = features.shape[1]  # Use the number of features as input dimension
+            seq_len = features.shape[0]  # Treat each sample as a sequence
+            features = features.reshape(seq_len, 1, input_dim)
+
         # Encode labels
         unique_labels = np.unique(labels)
         self.label_to_index = {label: idx for idx, label in enumerate(unique_labels)}
@@ -75,6 +82,18 @@ class PhonemeModelTrainer:
         return torch.tensor(features, dtype=torch.float32), torch.tensor(labels_encoded, dtype=torch.long)
 
     def build_model(self, input_dim, num_classes):
+        architecture = self.config["architecture"]
+
+        if architecture == "CNN":
+            self.build_cnn(input_dim, num_classes)
+        elif architecture == "MLP":
+            self.build_mlp(input_dim, num_classes)
+        elif architecture == "Transformer":
+            self.build_transformer(input_dim, num_classes)
+        else:
+            raise ValueError(f"Unsupported architecture: {architecture}")
+
+    def build_cnn(self, input_dim, num_classes):
         class PhonemeRecognitionCNN(nn.Module):
             def __init__(self, input_dim, conv_channels, linear_layers, dropout_rate, num_classes):
                 super(PhonemeRecognitionCNN, self).__init__()
@@ -119,18 +138,95 @@ class PhonemeModelTrainer:
                 x = self.output_layer(x)  # Output shape: (batch_size, num_classes)
                 return x
 
-        # Dynamically fetch convolutional channel sizes and linear layer sizes from the configuration
         conv_channels = [
-            self.config[f"conv_channels_{i}"] for i in range(1, 6)  # Fetch keys for conv_channels_1 to conv_channels_5
+            self.config[f"conv_channels_{i}"] for i in range(1, 6)
         ]
         linear_layers = [
-            self.config[f"linear_layer_{i}"] for i in range(1, 3)  # Fetch keys for linear_layer_1 to linear_layer_2
+            self.config[f"linear_layer_{i}"] for i in range(1, 3)
         ]
 
         self.model = PhonemeRecognitionCNN(
             input_dim=input_dim,
             conv_channels=conv_channels,
             linear_layers=linear_layers,
+            dropout_rate=self.config["dropout_rate"],
+            num_classes=num_classes
+        ).to(self.device)
+
+    def build_mlp(self, input_dim, num_classes):
+        class PhonemeRecognitionMLP(nn.Module):
+            def __init__(self, input_dim, hidden_units, dropout_rate, num_classes):
+                super(PhonemeRecognitionMLP, self).__init__()
+                self.layers = nn.ModuleList()
+                self.num_layers = len(hidden_units)
+
+                # Create layers dynamically
+                for i in range(self.num_layers):
+                    in_features = input_dim if i == 0 else hidden_units[i - 1]
+                    out_features = hidden_units[i]
+                    self.layers.append(nn.Sequential(
+                        nn.Linear(in_features, out_features),
+                        nn.BatchNorm1d(out_features),
+                        nn.ReLU(),
+                        nn.Dropout(dropout_rate)
+                    ))
+
+                # Output layer
+                self.output_layer = nn.Linear(hidden_units[-1], num_classes)
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                x = self.output_layer(x)  # Output shape: (batch_size, num_classes)
+                return x
+
+        hidden_units = [
+            self.config[f"hidden_units_{i}"] for i in range(1, 8)
+        ]
+
+        self.model = PhonemeRecognitionMLP(
+            input_dim=input_dim,
+            hidden_units=hidden_units,
+            dropout_rate=self.config["mlp_dropout_rate"],
+            num_classes=num_classes
+        ).to(self.device)
+
+    def build_transformer(self, input_dim, num_classes):
+        class PhonemeRecognitionTransformer(nn.Module):
+            def __init__(self, input_dim, num_heads, num_layers, hidden_dim, dropout_rate, num_classes):
+                super(PhonemeRecognitionTransformer, self).__init__()
+                self.embedding = nn.Linear(input_dim, hidden_dim)
+                self.positional_encoding = nn.Parameter(torch.zeros(1, 1000, hidden_dim))  # Max sequence length: 1000
+                self.transformer = nn.Transformer(
+                    d_model=hidden_dim,
+                    nhead=num_heads,
+                    num_encoder_layers=num_layers,
+                    num_decoder_layers=num_layers,
+                    dropout=dropout_rate
+                )
+                self.fc = nn.Linear(hidden_dim, num_classes)
+
+            def forward(self, x):
+                # Ensure input tensor is shaped as (batch_size, seq_len, input_dim)
+                if len(x.shape) != 3:
+                    raise ValueError(f"Input tensor must have shape (batch_size, seq_len, input_dim), but got {x.shape}")
+
+                seq_len = x.size(1)
+                if seq_len > self.positional_encoding.size(1):
+                    raise ValueError(f"Input sequence length ({seq_len}) exceeds maximum positional encoding length ({self.positional_encoding.size(1)}).")
+
+                # Apply embedding and positional encoding
+                x = self.embedding(x) + self.positional_encoding[:, :seq_len, :]
+                x = self.transformer(x, x)  # Self-attention
+                x = x.mean(dim=1)  # Global average pooling
+                x = self.fc(x)
+                return x
+
+        self.model = PhonemeRecognitionTransformer(
+            input_dim=input_dim,  # Match the reshaped input tensor's last dimension
+            num_heads=self.config["num_heads"],
+            num_layers=self.config["num_layers"],
+            hidden_dim=self.config["hidden_dim"],
             dropout_rate=self.config["dropout_rate"],
             num_classes=num_classes
         ).to(self.device)
@@ -149,7 +245,6 @@ class PhonemeModelTrainer:
 
     def load_model(self):
         self.model.load_state_dict(torch.load(self.checkpoint_path))
-        self.model.eval()
         print(f"Model loaded from {self.checkpoint_path}")
 
     def train(self):
@@ -191,6 +286,11 @@ class PhonemeModelTrainer:
 
         for batch_features, batch_labels in train_loader:
             batch_features, batch_labels = batch_features.to(self.device), batch_labels.to(self.device)
+
+            # Reshape input tensor for Transformer architecture
+            if self.config["architecture"] == "Transformer":
+                batch_features = batch_features.view(batch_features.size(0), -1, batch_features.size(1))  # Reshape to (batch_size, seq_len, input_dim)
+
             optimizer.zero_grad()
             outputs = self.model(batch_features)  # Shape: (batch_size, num_classes)
             loss = criterion(outputs, batch_labels)  # Single-column labels
@@ -217,31 +317,38 @@ class PhonemeModelTrainer:
         return train_loader
 
     def evaluate(self, checkpoint_path):
-        # Load the model from the specified checkpoint
-        self.checkpoint_path = checkpoint_path
-        self.load_model()
+        if self.config["architecture"] == "SVM":
+            # SVM evaluation logic
+            features, labels = self.load_data()
+            features_tensor, labels_tensor = self.preprocess_data(features, labels)
+            predictions = self.model.predict(features_tensor.cpu().numpy())
+            return predictions, labels_tensor.cpu().numpy()
+        else:
+            # Neural network evaluation logic
+            self.checkpoint_path = checkpoint_path
+            self.load_model()
 
-        # Prepare the test data loader
-        features, labels = self.load_data()
-        features_tensor, labels_tensor = self.preprocess_data(features, labels)
-        dataset = TensorDataset(features_tensor, labels_tensor)
-        test_size = int((1 - self.config["train_split"]) * len(dataset))
-        _, test_dataset = torch.utils.data.random_split(dataset, [len(dataset) - test_size, test_size])
-        test_loader = DataLoader(test_dataset, batch_size=self.config["batch_size"], shuffle=False)
+            # Prepare the test data loader
+            features, labels = self.load_data()
+            features_tensor, labels_tensor = self.preprocess_data(features, labels)
+            dataset = TensorDataset(features_tensor, labels_tensor)
+            test_size = int((1 - self.config["train_split"]) * len(dataset))
+            _, test_dataset = torch.utils.data.random_split(dataset, [len(dataset) - test_size, test_size])
+            test_loader = DataLoader(test_dataset, batch_size=self.config["batch_size"], shuffle=False)
 
-        # Evaluate the model
-        self.model.eval()
-        all_predictions = []
-        all_labels = []
-        with torch.no_grad():
-            for batch_features, batch_labels in test_loader:
-                batch_features, batch_labels = batch_features.to(self.device), batch_labels.to(self.device)
-                outputs = self.model(batch_features)  # Shape: (batch_size, num_classes)
-                _, predictions = torch.max(outputs, 1)  # Get predictions
-                all_predictions.extend(predictions.cpu().numpy())
-                all_labels.extend(batch_labels.cpu().numpy())
+            # Evaluate the model
+            self.model.eval()
+            all_predictions = []
+            all_labels = []
+            with torch.no_grad():
+                for batch_features, batch_labels in test_loader:
+                    batch_features, batch_labels = batch_features.to(self.device), batch_labels.to(self.device)
+                    outputs = self.model(batch_features)  # Shape: (batch_size, num_classes)
+                    _, predictions = torch.max(outputs, 1)  # Get predictions
+                    all_predictions.extend(predictions.cpu().numpy())
+                    all_labels.extend(batch_labels.cpu().numpy())
 
-        return np.array(all_predictions), np.array(all_labels)
+            return np.array(all_predictions), np.array(all_labels)
 
     def parse_phonemes_to_sentence(self, phonemes):
         words = []
