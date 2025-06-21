@@ -1,0 +1,8 @@
+Stimulus,TMS,Correct_Key,TMStarget,Task,TrialN,Order,Phoneme1,Phoneme2,P1_TSidx,P2_TSidx,TMS_TSidx,Place,Manner,Voicing,Category,Correct_key,Phoneme3,P3_TSidx
+Pat_happy2,1,,BA06,Words,405,,p,a,5277671,5277788.0,5277571,,,,real,1.0,t,5278122.0
+,,,
+Put_angry1,0,,control_BA44,Words,494,,p,u,3740974,3741121.0,3740874,,,,nonce,2.0,t,3741405.0
+,,,
+Bat_happy1,1,,BA06,Words,123,,b,a,1234567,1234789.0,1234456,,,,real,1.0,t,1234890.0
+,,,
+Bed_happy2,1,,BA44,Words,692,,b,e,6034710,6034757.0,6034610,,,,real,1.0,d,6035040.0

@@ -16,6 +16,7 @@ class PhonemeModelTrainer:
         self.model = None
         self.label_to_index = None
         self.index_to_label = None
+        self.combined_phoneme_uniques = None  # To store unique combined phonemes
 
     def load_config(self, config_path):
         with open(config_path, "r") as file:
@@ -29,6 +30,7 @@ class PhonemeModelTrainer:
         # directories = [self.data_dir, os.path.join(os.path.dirname(self.data_dir), "augmented_data")]
         directories = [self.data_dir]
         
+        all_combined_phonemes = []  # To store all combined phonemes across files
         for directory in directories:
             for root, _, files in os.walk(directory):
                 for file in files:
@@ -52,11 +54,15 @@ class PhonemeModelTrainer:
                         extracted_features = df[feature_columns].apply(lambda x: pd.factorize(x)[0], axis=0)  # Factorize categorical features
                         features.append(extracted_features.values)
 
-                        # Combine Phoneme1 and Phoneme2 into a single column
-                        df["combined_phonemes"] = df["phoneme1"].fillna("") + "" + df["phoneme2"].fillna("")
-                        combined_labels = pd.factorize(df["combined_phonemes"])[0]  # Factorize combined phonemes
-                        labels.append(combined_labels)
+                        # Combine Phoneme1, Phoneme2, and Phoneme3 into a single column if phoneme3 exists, else just use phoneme1 and phoneme2
+                        if "phoneme3" in df.columns:
+                            df["combined_phonemes"] = df["phoneme1"].fillna("") + "" + df["phoneme2"].fillna("") + "" + df["phoneme3"].fillna("")
+                        else:
+                            df["combined_phonemes"] = df["phoneme1"].fillna("") + "" + df["phoneme2"].fillna("")
+                        all_combined_phonemes.extend(df["combined_phonemes"].values)  # Collect all combined phonemes
+                        labels.append(df["combined_phonemes"].values)
 
+        self.combined_phoneme_uniques = pd.unique(all_combined_phonemes)  # Store unique combined phonemes
         return np.vstack(features), np.hstack(labels)
 
     def preprocess_data(self, features, labels):
@@ -68,16 +74,15 @@ class PhonemeModelTrainer:
 
         # Reshape features for Transformer architecture
         if self.config["architecture"] == "Transformer":
-            # Ensure features are reshaped to (batch_size, seq_len, input_dim)
-            input_dim = features.shape[1]  # Use the number of features as input dimension
-            seq_len = features.shape[0]  # Treat each sample as a sequence
+            input_dim = features.shape[1]
+            seq_len = features.shape[0]
             features = features.reshape(seq_len, 1, input_dim)
 
         # Encode labels
         unique_labels = np.unique(labels)
-        self.label_to_index = {label: idx for idx, label in enumerate(unique_labels)}
-        self.index_to_label = {idx: label for label, idx in self.label_to_index.items()}
-        labels_encoded = np.array([self.label_to_index[label] for label in labels])  # Handle 1D labels
+        self.index_to_label = {idx: label for idx, label in enumerate(self.combined_phoneme_uniques)}
+        self.label_to_index = {label: idx for idx, label in self.index_to_label.items()}
+        labels_encoded = np.array([self.label_to_index[label] for label in labels])
 
         return torch.tensor(features, dtype=torch.float32), torch.tensor(labels_encoded, dtype=torch.long)
 
