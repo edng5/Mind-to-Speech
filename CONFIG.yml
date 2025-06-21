@@ -31,4 +31,4 @@ learning_rate: 0.0005
 batch_size: 256
 epochs: 100
 train_split: 0.8
-save_threshold: 0.5
+save_threshold: 0.6

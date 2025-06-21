@@ -1,0 +1,4 @@
+Stimulus,TMS,Correct_Key,TMStarget,Task,TrialN,Order,Phoneme1,Phoneme2,P1_TSidx,P2_TSidx,TMS_TSidx,Place,Manner,Voicing,Category,Correct_key,Phoneme3,P3_TSidx
+Tap_happy2,1,,BA06,Words,433,,t,a,4285206,4285332.0,4285106,,,,real,1.0,p,4285653.0
+,,,
+Tub_happy2,1,,BA06,Words,492,,t,u,4045939,4046044.0,4045839,,,,real,1.0,b,4046383.0
