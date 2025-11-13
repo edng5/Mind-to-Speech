@@ -1,11 +1,10 @@
 # Environments
-data2
-data3
-temp_models
-augmented_data
 .vscode
+.env
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
 
-.pytest_cache/
+data/
+
+
