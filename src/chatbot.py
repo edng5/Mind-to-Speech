@@ -34,10 +34,4 @@ class Chatbot:
             ]
         )
 
-        # response object shape can vary by SDK version; handle common cases
-        if isinstance(resp, dict):
-            text = resp.get("completion", "") or resp.get("text", "")
-        else:
-            text = getattr(resp, "completion", None) or getattr(resp, "text", "") or ""
-
-        return text.strip()
+        return resp.content[0].text
